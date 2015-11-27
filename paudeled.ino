@@ -11,7 +11,7 @@
 //#include "/home/oda/sketchbook/paudeled_0_4/img/teste.h"
 
 #define CS 10
-#define SPI_RATE 2
+#define SPI_RATE 12
 
 #define STRIP_LEN 60   // quantidade de leds
 #define STRIP_LEN_FRONT 45   // quantidade de leds
@@ -73,9 +73,9 @@ void loop() {
     int i = s*k+STRIP_LEN_FRONT;
     int j = c*k+STRIP_LEN_FRONT;
     unsigned char idx = (unsigned char)pgm_read_byte_near(&header_data[i*width+j]);
-    leds[4*(k+1)+1]=header_data_cmap[idx][0];
+    leds[4*(k+1)+1]=header_data_cmap[idx][2];
     leds[4*(k+1)+2]=header_data_cmap[idx][1];
-    leds[4*(k+1)+3]=header_data_cmap[idx][2];
+    leds[4*(k+1)+3]=header_data_cmap[idx][0];
   }
   long bench=micros();
   spiSend(leds,BUFF_LEN);
