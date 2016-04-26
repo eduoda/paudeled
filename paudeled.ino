@@ -12,34 +12,39 @@
 #define BRIGHTNESS 0x1F
 #define HALL_PIN 2  // porta do sendor hall, precisa suportar interrupcao
 
+#define header_data_cmap  header_data_cmap_garoa
+#define header_data       header_data_garoa
+
 void turn();
 
 volatile unsigned long tic; // Instante da ultima passada pelo sensor hall
 volatile float K = 0.1;     // constante que converte o instante de tempo no angulo (setor)
                             // eh 2PI/periodo. 1000RPM => periodo = 60ms => k = 0.1
 
-uint8_t sectors[SECTORS][BUFF_LEN]; // ocupa 89280 bytes
+uint8_t buff[BUFF_LEN];               // o buffer que sera transmitido
+uint8_t sectors[SECTORS][STRIP_LEN];  // guarda os indices
+uint8_t sectors2[SECTORS][STRIP_LEN];  // guarda os indices
+uint8_t *sectors_aux;
 
 void setup() {
   Serial.begin(115200);
   
   // start/end frame
-  for(uint16_t theta=0; theta<SECTORS; theta++){
-    for(uint8_t i=0;i<4;i++){
-      sectors[theta][i]=0x00;           // A start frame of 32 zero bits (<0x00> <0x00> <0x00> <0x00>)
-      sectors[theta][BUFF_LEN-i]=0xFF;  // An end frame consisting of at least (n/2) bits of 1, where n is the number of LEDs in the string.
-    }
-    for(uint8_t i=STRIP_LEN_FRONT;i<STRIP_LEN;i++){
-      sectors[theta][4*(i+1)+0]=0xE0|0;
-      sectors[theta][4*(i+1)+1]=0;
-      sectors[theta][4*(i+1)+2]=0;
-      sectors[theta][4*(i+1)+3]=0;
-    }
-    sectors[theta][4*(STRIP_LEN_FRONT+2)+0]=0xE0|BRIGHTNESS;
-    sectors[theta][4*(STRIP_LEN_FRONT+2)+1]=0;
-    sectors[theta][4*(STRIP_LEN_FRONT+2)+2]=0;
-    sectors[theta][4*(STRIP_LEN_FRONT+2)+3]=255;
+  for(uint8_t i=0;i<4;i++){
+    buff[i]=0x00;           // A start frame of 32 zero bits (<0x00> <0x00> <0x00> <0x00>)
+    buff[BUFF_LEN-i]=0xFF;  // An end frame consisting of at least (n/2) bits of 1, where n is the number of LEDs in the string.
   }
+  // leds da parte de tras
+  for(uint8_t i=STRIP_LEN_FRONT;i<STRIP_LEN;i++){
+    buff[4*(i+1)+0]=0xE0|0;
+    buff[4*(i+1)+1]=0;
+    buff[4*(i+1)+2]=0;
+    buff[4*(i+1)+3]=0;
+  }
+  buff[4*(STRIP_LEN_FRONT+2)+0]=0xE0|BRIGHTNESS;
+  buff[4*(STRIP_LEN_FRONT+2)+1]=0;
+  buff[4*(STRIP_LEN_FRONT+2)+2]=0;
+  buff[4*(STRIP_LEN_FRONT+2)+3]=255;
 
   pinMode(HALL_PIN, INPUT);
   attachInterrupt(digitalPinToInterrupt(HALL_PIN), turn, RISING);
@@ -76,15 +81,22 @@ void loop() {
   uint16_t theta2;
   long start = millis();
   for(unsigned cont=0;cont<100000;cont++){
+//  for(;;){
     now = millis();
     tac = now-tic;
     theta = K*tac;
     theta2=((int)theta)%SECTORS;
-    spiSend(sectors[theta2],BUFF_LEN);
-//    if(theta<360)
-//      spiSend(sectors[(int)theta],BUFF_LEN);
-//    else
-//      spiSend(sectors[0],BUFF_LEN);
+
+    for(uint8_t k=0;k<STRIP_LEN_FRONT;k++) {
+      // A 32 bit LED frame for each LED in the string (<0xE0+brightness> <blue> <green> <red>)
+      uint8_t idx=sectors[theta2][k];
+      buff[4*(k+1)+0]=0xE0|BRIGHTNESS;
+      buff[4*(k+1)+1]=header_data_cmap[idx][2];
+      buff[4*(k+1)+2]=header_data_cmap[idx][1];
+      buff[4*(k+1)+3]=header_data_cmap[idx][0];
+    }
+    
+    spiSend(buff,BUFF_LEN);
     //delayMicroseconds(50); //atualiza parte da imagem
     /*
      * A primeira estrategia eh atualizar o setor antes de enviar
@@ -108,16 +120,26 @@ void loadImage(){
     for(uint8_t k=0;k<STRIP_LEN_FRONT;k++) {
       uint8_t i = s*k+STRIP_LEN_FRONT;
       uint8_t j = c*k+STRIP_LEN_FRONT;
-//      unsigned char idx = (unsigned char)pgm_read_byte_near(&header_data[i*2*STRIP_LEN_FRONT+j]);
-      // A 32 bit LED frame for each LED in the string (<0xE0+brightness> <blue> <green> <red>)
-      uint8_t idx = header_data_juca[i*2*STRIP_LEN_FRONT+j];
-      sectors[theta][4*(k+1)+0]=0xE0|BRIGHTNESS; //TODO: possivelmente desnecessario, pode fazer uma vez so no setup
-      sectors[theta][4*(k+1)+1]=header_data_cmap_juca[idx][2];
-      sectors[theta][4*(k+1)+2]=header_data_cmap_juca[idx][1];
-      sectors[theta][4*(k+1)+3]=header_data_cmap_juca[idx][0];
+      sectors[theta][k] = header_data[i*2*STRIP_LEN_FRONT+j];
     }
   }
 }
+
+typedef void (*step)();
+step nextstep = &step1;
+void step1(){
+  nextstep = &step2;
+}
+void step2(){
+  nextstep = &step3;
+}
+void step3(){
+  nextstep = &step4;
+}
+void step4(){
+  nextstep = &step1;
+}
+
 
 /*
 void writeMonoStr(char* s, int theta) {
